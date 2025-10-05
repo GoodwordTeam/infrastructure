@@ -1,0 +1,90 @@
+# SQLMesh Database - Aurora PostgreSQL Serverless
+# This file contains:
+# - SQLMesh PostgreSQL RDS instance (Aurora Serverless)
+# - DB subnet group
+# - Security group rules
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'SQLMesh Database - Aurora PostgreSQL Serverless'
+
+Parameters:
+  VpcId:
+    Type: String
+    Description: VPC ID
+  
+  DataSubnet1Id:
+    Type: String
+    Description: Data Subnet 1 ID (Primary)
+  
+  DataSubnet2Id:
+    Type: String
+    Description: Data Subnet 2 ID (Required by AWS)
+  
+  SqlmeshPostgresSecurityGroupId:
+    Type: String
+    Description: SQLMesh PostgreSQL Security Group ID
+  
+  # SQLMesh PostgreSQL credentials
+  SqlmeshPostgresPassword:
+    Type: String
+    Description: SQLMesh PostgreSQL password
+    NoEcho: true
+
+Resources:
+  # DB Subnet Group (2 AZs required by AWS, RDS deploys in DataSubnet1)
+  SqlmeshPostgresDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for SQLMesh PostgreSQL (2 AZs required by AWS)
+      SubnetIds:
+        - !Ref DataSubnet1Id
+        - !Ref DataSubnet2Id
+      Tags:
+        - Key: Name
+          Value: ops-sqlmesh-postgres-db-subnet-group
+
+  # SQLMesh PostgreSQL RDS Instance
+  SqlmeshPostgresDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: ops-sqlmesh-postgres
+      DBName: sqlmesh_data
+      DBInstanceClass: db.t3.micro
+      Engine: postgres
+      EngineVersion: '15.7'
+      MasterUsername: postgres
+      MasterUserPassword: !Ref SqlmeshPostgresPassword
+      AllocatedStorage: 20
+      StorageType: gp2
+      StorageEncrypted: true
+      BackupRetentionPeriod: 1
+      MultiAZ: false
+      PubliclyAccessible: false
+      DeletionProtection: true
+      VPCSecurityGroups:
+        - !Ref SqlmeshPostgresSecurityGroupId
+      DBSubnetGroupName: !Ref SqlmeshPostgresDBSubnetGroup
+      Tags:
+        - Key: Name
+          Value: ops-sqlmesh-postgres
+        - Key: Purpose
+          Value: SQLMesh State Storage
+
+Outputs:
+  SqlmeshPostgresDBInstanceId:
+    Description: SQLMesh PostgreSQL DB Instance ID
+    Value: !Ref SqlmeshPostgresDB
+    Export:
+      Name: !Sub '${AWS::StackName}-SqlmeshPostgresDBInstanceId'
+  
+  SqlmeshPostgresDBEndpoint:
+    Description: SQLMesh PostgreSQL DB Endpoint
+    Value: !GetAtt SqlmeshPostgresDB.Endpoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}-SqlmeshPostgresDBEndpoint'
+  
+  SqlmeshPostgresDBPort:
+    Description: SQLMesh PostgreSQL DB Port
+    Value: !GetAtt SqlmeshPostgresDB.Endpoint.Port
+    Export:
+      Name: !Sub '${AWS::StackName}-SqlmeshPostgresDBPort'

@@ -1,0 +1,76 @@
+{
+    "AlignedStartTime": "2025-07-11T07:55:00-04:00",
+    "AlignedEndTime": "2025-07-11T11:55:00-04:00",
+    "Keys": [
+        {
+            "Dimensions": {
+                "db.host.id": "B17565C65BD8EA6173CA3820878364F91413B33F",
+                "db.host.name": "172.20.80.48"
+            },
+            "Total": 21.474274471224792
+        },
+        {
+            "Dimensions": {
+                "db.host.id": "24ADF4348DBC5EB7F75FE3D9D30550965E03A121",
+                "db.host.name": "172.20.100.89"
+            },
+            "Total": 4.439547466797836
+        },
+        {
+            "Dimensions": {
+                "db.host.id": "E702BFA7EFA9F58250D62B521B901B5C2622FD93",
+                "db.host.name": "172.20.100.62"
+            },
+            "Total": 0.17166748647319233
+        },
+        {
+            "Dimensions": {
+                "db.host.id": "E110A8D503797E915611F77141278ACF45A13181",
+                "db.host.name": "[local]"
+            },
+            "Total": 0.038760452533202164
+        },
+        {
+            "Dimensions": {
+                "db.host.id": "EEB50E19E0427489D2859A849F321FC2167EDD9C",
+                "db.host.name": "172.20.60.163"
+            },
+            "Total": 0.025381210034431875
+        },
+        {
+            "Dimensions": {
+                "db.host.id": "572DC4C14D35F2514DA7D299BE7F2BBC4CB71541",
+                "db.host.name": "172.20.61.198"
+            },
+            "Total": 0.020855878012788983
+        },
+        {
+            "Dimensions": {
+                "db.host.id": "99EBB9B5E323938F64C2E71FA1FEE146020F4433",
+                "db.host.name": "172.20.41.23"
+            },
+            "Total": 0.02016724053123463
+        },
+        {
+            "Dimensions": {
+                "db.host.id": "18A8D13FE14FC803148BA2E5C5009AF79072EE13",
+                "db.host.name": "172.20.41.51"
+            },
+            "Total": 0.018494835218888343
+        },
+        {
+            "Dimensions": {
+                "db.host.id": "E8FC3C476D451F05D2F0502DFC8321E957103028",
+                "db.host.name": "174.65.186.20"
+            },
+            "Total": 0.007476635514018692
+        },
+        {
+            "Dimensions": {
+                "db.host.id": "E883F6FB66375E1FF30EA11F269035C7486CBDA7",
+                "db.host.name": "10.63.13.69"
+            },
+            "Total": 0.0008853910477127398
+        }
+    ]
+}

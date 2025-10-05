@@ -1,0 +1,235 @@
+# Operations Host - EC2 Instance with RustDesk and Tailscale
+# This file contains:
+# - Operations Host EC2 instance (t3.small)
+# - IAM role and policies
+# - Elastic IP
+# - CloudWatch logging
+# - RustDesk + Tailscale setup
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Operations Host - EC2 Instance with RustDesk and Tailscale'
+
+Parameters:
+  VpcId:
+    Type: String
+    Description: VPC ID
+  
+  PublicSubnetId:
+    Type: String
+    Description: Public Subnet ID
+  
+  AccessServerSecurityGroupId:
+    Type: String
+    Description: Access Server Security Group ID
+  
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: ops-vpc-key
+    Description: Name of the EC2 KeyPair to enable SSH access
+  
+  TailscaleAuthKey:
+    Type: String
+    Description: Tailscale authentication key
+    NoEcho: true
+
+Resources:
+  # IAM Role for Operations Host
+  OperationsHostRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ops-access-server-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: SSMParameterAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ops/*'
+        - PolicyName: DatabaseMigrationPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:aurora-data-operations*'
+                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:snowflake-warehouse*'
+                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:tailscale-auth-key*'
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - 'arn:aws:s3:::growth-automations'
+                  - 'arn:aws:s3:::growth-automations/*'
+              - Effect: Allow
+                Action:
+                  - rds:DescribeDBInstances
+                Resource: '*'
+      Tags:
+        - Key: Name
+          Value: ops-access-server-role
+
+  # Instance Profile
+  OperationsHostInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref OperationsHostRole
+
+  # Note: Using dynamic public IP instead of Elastic IP to avoid EIP limit
+
+  # Operations Host EC2 Instance
+  OperationsHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-077b630ef539aa0b5
+      InstanceType: t3.small
+      KeyName: !Ref KeyPairName
+      SubnetId: !Ref PublicSubnetId
+      SecurityGroupIds:
+        - !Ref AccessServerSecurityGroupId
+      IamInstanceProfile: !Ref OperationsHostInstanceProfile
+      SourceDestCheck: false
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          apt update -y
+          
+          # Add SSH keys for both cfischer and ops access
+          echo "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCtQMJfj78FA8eI+kovopx8AjPXRYr7NmaPy6e80kMzJPqkuafm6TCI9OdaOpexojmRi4jA7QmvyOi6MLtIkwDL2ZyJC3iJG6DnLntX/Gv/Ohiqy8Xq3n7lpGeQT8DaJh6Htj4rKIbOKX+XUABUU+EBqUNMQWzCfq0eFRZih4J7UgqYxXdfEnctl/4Kfu0mL8X6AlbzZ+N3EWQMBKwVfZ+9SeYjf00XRXL0YV1uL4w4tvD5UU8pWqLuwfYWaaaTN9Iu7RbYWzUA5mItZ6CPur67IdqRZ8gsqRJKO+P9PfgDx68KXDZlcYI0iNXrl6ZM8YKZQz8vGwfZb3TTCyUnhnOj ops-vpc-key" >> /home/ec2-user/.ssh/authorized_keys
+          # TODO: Add cfischer public key here when available
+          
+          # Install required packages for database migration
+          dnf install -y jq postgresql15
+          
+          # Install Tailscale
+          # CRITICAL: Advertise /13 network to route ALL VPCs in the 172.16.0.0/13 space
+          # This covers current and future VPCs (172.16.0.0/13 = 172.16.0.0 to 172.23.255.255)
+          # DO NOT advertise smaller routes like /16 or /20 - this breaks routing to other VPCs
+          curl -fsSL https://tailscale.com/install.sh | sh
+          tailscale up --authkey=${TailscaleAuthKey} --advertise-routes=172.16.0.0/13 --accept-routes
+          
+          # Install RustDesk
+          wget https://github.com/rustdesk/rustdesk/releases/download/1.2.3/rustdesk-1.2.3-x86_64.rpm
+          rpm -i rustdesk-1.2.3-x86_64.rpm
+          
+          # Configure RustDesk
+          systemctl enable rustdesk
+          systemctl start rustdesk
+          
+          # Install CloudWatch agent
+          wget https://s3.amazonaws.com/amazoncloudwatch-agent/amazon_linux/amd64/latest/amazon-cloudwatch-agent.rpm
+          rpm -U ./amazon-cloudwatch-agent.rpm
+          
+          # Create CloudWatch config
+          cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << 'EOF'
+          {
+            "logs": {
+              "logs_collected": {
+                "files": {
+                  "collect_list": [
+                    {
+                      "file_path": "/var/log/messages",
+                      "log_group_name": "/aws/ec2/ops-access-server",
+                      "log_stream_name": "{instance_id}/messages"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+          EOF
+          
+          # Start CloudWatch agent
+          /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+            -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
+          
+          # Set up port forwarding for SQLMesh UI
+          # Enable IP forwarding
+          echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+          sysctl -p
+          
+          # Set up generic NAT rules for all traffic from Tailscale to VPC
+          # Forward all traffic from Tailscale to SQLMesh Server
+          iptables -t nat -A PREROUTING -i tailscale0 -d 100.74.203.85 -j DNAT --to-destination 172.22.2.106
+          
+          # Masquerade all traffic from Tailscale range to VPC
+          iptables -t nat -A POSTROUTING -o ens5 -s 100.64.0.0/10 -j MASQUERADE
+          
+          # Allow all forwarding between Tailscale and VPC
+          iptables -A FORWARD -i tailscale0 -o ens5 -j ACCEPT
+          iptables -A FORWARD -i ens5 -o tailscale0 -j ACCEPT
+          
+          # Save iptables rules
+          mkdir -p /etc/iptables
+          iptables-save > /etc/iptables/rules.v4
+          
+          # Create systemd service to restore iptables rules on boot
+          cat > /etc/systemd/system/iptables-restore.service << 'EOF'
+          [Unit]
+          Description=Restore iptables rules
+          Before=network.target
+          
+          [Service]
+          Type=oneshot
+          ExecStart=/sbin/iptables-restore /etc/iptables/rules.v4
+          RemainAfterExit=yes
+          
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          
+          # Enable and start iptables restore service
+          systemctl enable iptables-restore.service
+          systemctl start iptables-restore.service
+          
+      Tags:
+        - Key: Name
+          Value: ops-access-server
+        - Key: Purpose
+          Value: Operations Access
+    # No Elastic IP dependency needed
+
+  # CloudWatch Log Group
+  OperationsHostLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/ec2/ops-access-server
+      RetentionInDays: 14
+
+Outputs:
+  OperationsHostInstanceId:
+    Description: Operations Host Instance ID
+    Value: !Ref OperationsHost
+    Export:
+      Name: !Sub '${AWS::StackName}-OperationsHostInstanceId'
+  
+  OperationsHostPublicIP:
+    Description: Operations Host Public IP
+    Value: !GetAtt OperationsHost.PublicIp
+    Export:
+      Name: !Sub '${AWS::StackName}-OperationsHostPublicIP'
+  
+  OperationsHostPrivateIP:
+    Description: Operations Host Private IP
+    Value: !GetAtt OperationsHost.PrivateIp
+    Export:
+      Name: !Sub '${AWS::StackName}-OperationsHostPrivateIP'

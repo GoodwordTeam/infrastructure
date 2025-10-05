@@ -1,0 +1,125 @@
+{
+    "AlignedStartTime": "2025-07-11T07:55:00-04:00",
+    "AlignedEndTime": "2025-07-11T11:55:00-04:00",
+    "Keys": [
+        {
+            "Dimensions": {
+                "db.wait_event.name": "CPU",
+                "db.wait_event.type": "CPU"
+            },
+            "Total": 24.798327594687652
+        },
+        {
+            "Dimensions": {
+                "db.wait_event.name": "Client:ClientWrite",
+                "db.wait_event.type": "Client"
+            },
+            "Total": 0.525233644859813
+        },
+        {
+            "Dimensions": {
+                "db.wait_event.name": "IPC:BufferIo",
+                "db.wait_event.type": "IPC"
+            },
+            "Total": 0.31283817019183474
+        },
+        {
+            "Dimensions": {
+                "db.wait_event.name": "Lock:Transactionid",
+                "db.wait_event.type": "Lock"
+            },
+            "Total": 0.21524840137727497
+        },
+        {
+            "Dimensions": {
+                "db.wait_event.name": "IO:DataFileRead",
+                "db.wait_event.type": "IO"
+            },
+            "Total": 0.20354156419085095
+        },
+        {
+            "Dimensions": {
+                "db.wait_event.name": "IO:XactSync",
+                "db.wait_event.type": "IO"
+            },
+            "Total": 0.042105263157894736
+        },
+        {
+            "Dimensions": {
+                "db.wait_event.name": "Unknown",
+                "db.wait_event.type": "Unknown"
+            },
+            "Total": 0.03315297589768815
+        },
+        {
+            "Dimensions": {
+                "db.wait_event.name": "IO:DataFilePrefetch",
+                "db.wait_event.type": "IO"
+            },
+            "Total": 0.03207083128381702
+        },
+        {
+            "Dimensions": {
+                "db.wait_event.name": "LWLock:LockManager",
+                "db.wait_event.type": "LWLock"
+            },
+            "Total": 0.01780619773733399
+        },
+        {
+            "Dimensions": {
+                "db.wait_event.name": "LWLock:BufferContent",
+                "db.wait_event.type": "LWLock"
+            },
+            "Total": 0.008263649778652238
+        },
+        {
+            "Dimensions": {
+                "db.wait_event.name": "Timeout:VacuumDelay",
+                "db.wait_event.type": "Timeout"
+            },
+            "Total": 0.008165272995573045
+        },
+        {
+            "Dimensions": {
+                "db.wait_event.name": "LWLock:BufferMapping",
+                "db.wait_event.type": "LWLock"
+            },
+            "Total": 0.006886374815543532
+        },
+        {
+            "Dimensions": {
+                "db.wait_event.name": "IO:AuroraStorageLogAllocate",
+                "db.wait_event.type": "IO"
+            },
+            "Total": 0.006492867683226758
+        },
+        {
+            "Dimensions": {
+                "db.wait_event.name": "LWLock:ProcArray",
+                "db.wait_event.type": "LWLock"
+            },
+            "Total": 0.0035415641908509593
+        },
+        {
+            "Dimensions": {
+                "db.wait_event.name": "Timeout:SpinDelay",
+                "db.wait_event.type": "Timeout"
+            },
+            "Total": 0.002557796360059026
+        },
+        {
+            "Dimensions": {
+                "db.wait_event.name": "IPC:ProcarrayGroupUpdate",
+                "db.wait_event.type": "IPC"
+            },
+            "Total": 0.0010821446138711264
+        },
+        {
+            "Dimensions": {
+                "db.wait_event.name": "LWLock:XidGen",
+                "db.wait_event.type": "LWLock"
+            },
+            "Total": 0.00019675356615838662
+        }
+    ]
+}

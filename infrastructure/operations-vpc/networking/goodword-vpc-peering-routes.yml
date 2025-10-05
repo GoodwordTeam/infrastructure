@@ -1,0 +1,99 @@
+# Goodword VPC - Operations VPC Peering Routes
+# This template should be added to the Goodword VPC repository
+# to enable bidirectional communication with Operations VPC
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Goodword VPC - Operations VPC Peering Routes for Snowflake Integration'
+
+Parameters:
+  VpcPeeringConnectionId:
+    Type: String
+    Description: VPC Peering Connection ID to Operations VPC
+    Default: pcx-093256f9adcfae896
+  
+  OperationsVpcCidr:
+    Type: String
+    Description: Operations VPC CIDR block
+    Default: 172.22.0.0/16
+
+Resources:
+  # Route to Operations VPC for private subnet 1 (us-east-2a)
+  OperationsVpcRoutePrivate1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1  # Update with actual reference
+      DestinationCidrBlock: !Ref OperationsVpcCidr
+      VpcPeeringConnectionId: !Ref VpcPeeringConnectionId
+
+  # Route to Operations VPC for private subnet 2 (us-east-2b)
+  OperationsVpcRoutePrivate2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2  # Update with actual reference
+      DestinationCidrBlock: !Ref OperationsVpcCidr
+      VpcPeeringConnectionId: !Ref VpcPeeringConnectionId
+
+  # Route to Operations VPC for private subnet 3 (us-east-2a)
+  OperationsVpcRoutePrivate3:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable3  # Update with actual reference
+      DestinationCidrBlock: !Ref OperationsVpcCidr
+      VpcPeeringConnectionId: !Ref VpcPeeringConnectionId
+
+  # Route to Operations VPC for private subnet 4 (us-east-2b)
+  OperationsVpcRoutePrivate4:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable4  # Update with actual reference
+      DestinationCidrBlock: !Ref OperationsVpcCidr
+      VpcPeeringConnectionId: !Ref VpcPeeringConnectionId
+
+  # Route to Operations VPC for public subnet
+  OperationsVpcRoutePublic:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable  # Update with actual reference
+      DestinationCidrBlock: !Ref OperationsVpcCidr
+      VpcPeeringConnectionId: !Ref VpcPeeringConnectionId
+
+  # Security Group Rules for Cross-VPC Communication
+  # Add these rules to your existing security groups that need cross-VPC access
+  
+  # Example: VPN Mesh Server Security Group Rules
+  VpnMeshServerCrossVpcRules:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref VpnMeshServerSecurityGroup  # Update with actual reference
+      IpPermissions:
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          IpRanges:
+            - CidrIp: !Ref OperationsVpcCidr
+              Description: ICMP from Operations VPC
+        - IpProtocol: tcp
+          FromPort: 1
+          ToPort: 65535
+          IpRanges:
+            - CidrIp: !Ref OperationsVpcCidr
+              Description: TCP from Operations VPC
+        - IpProtocol: udp
+          FromPort: 1
+          ToPort: 65535
+          IpRanges:
+            - CidrIp: !Ref OperationsVpcCidr
+              Description: UDP from Operations VPC
+
+Outputs:
+  OperationsVpcPeeringConnectionId:
+    Description: VPC Peering Connection ID to Operations VPC
+    Value: !Ref VpcPeeringConnectionId
+    Export:
+      Name: !Sub '${AWS::StackName}-OperationsVpcPeeringConnectionId'
+  
+  OperationsVpcCidr:
+    Description: Operations VPC CIDR block
+    Value: !Ref OperationsVpcCidr
+    Export:
+      Name: !Sub '${AWS::StackName}-OperationsVpcCidr'

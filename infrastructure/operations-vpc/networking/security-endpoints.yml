@@ -1,0 +1,418 @@
+# Operations VPC - Security Groups and Secrets
+# This file contains:
+# - All security groups for all services
+# - VPC peering to GoodWord VPC
+# - SSM Parameters for all secrets (PostgreSQL, Snowflake, Tailscale)
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Operations VPC - Security Groups and Secrets'
+
+Parameters:
+  VpcId:
+    Type: String
+    Description: VPC ID
+  
+  PrivateSubnetId:
+    Type: String
+    Description: Private Subnet ID for VPC Endpoint
+  
+  # Data Operations PostgreSQL credentials
+  DataOpsPostgresHost:
+    Type: String
+    Description: Data Operations PostgreSQL host
+    NoEcho: true
+  
+  DataOpsPostgresPort:
+    Type: String
+    Description: Data Operations PostgreSQL port
+    NoEcho: true
+  
+  DataOpsPostgresUser:
+    Type: String
+    Description: Data Operations PostgreSQL username
+    NoEcho: true
+  
+  DataOpsPostgresPassword:
+    Type: String
+    Description: Data Operations PostgreSQL password
+    NoEcho: true
+  
+  # Snowflake credentials
+  SnowflakeAccount:
+    Type: String
+    Description: Snowflake account identifier
+    NoEcho: true
+  
+  SnowflakeUser:
+    Type: String
+    Description: Snowflake username
+    NoEcho: true
+  
+  SnowflakePassword:
+    Type: String
+    Description: Snowflake password
+    NoEcho: true
+  
+  SnowflakeWarehouse:
+    Type: String
+    Description: Snowflake warehouse
+    NoEcho: true
+  
+  SnowflakeDatabase:
+    Type: String
+    Description: Snowflake database
+    NoEcho: true
+  
+  SnowflakeSchema:
+    Type: String
+    Description: Snowflake schema
+    NoEcho: true
+  
+  # Tailscale auth key
+  TailscaleAuthKey:
+    Type: String
+    Description: Tailscale authentication key
+    NoEcho: true
+
+Resources:
+  # Security Groups
+  AccessServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ops-access-server-sg
+      GroupDescription: Security group for Access Server (RustDesk + Tailscale)
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH
+        - IpProtocol: tcp
+          FromPort: 21115
+          ToPort: 21116
+          CidrIp: 0.0.0.0/0
+          Description: RustDesk
+        - IpProtocol: udp
+          FromPort: 41641
+          ToPort: 41641
+          CidrIp: 0.0.0.0/0
+          Description: Tailscale
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 172.20.0.0/16
+          Description: ICMP from Goodword VPC
+        - IpProtocol: tcp
+          FromPort: 1
+          ToPort: 65535
+          CidrIp: 172.20.0.0/16
+          Description: TCP from Goodword VPC
+        - IpProtocol: udp
+          FromPort: 1
+          ToPort: 65535
+          CidrIp: 172.20.0.0/16
+          Description: UDP from Goodword VPC
+      Tags:
+        - Key: Name
+          Value: ops-access-server-sg
+
+  SqlmeshServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ops-sqlmesh-server-sg
+      GroupDescription: Security group for SQLMesh Server
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref AccessServerSecurityGroup
+          Description: SSH from Access Server
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          SourceSecurityGroupId: !Ref AccessServerSecurityGroup
+          Description: SQLMesh UI from Access Server
+      Tags:
+        - Key: Name
+          Value: ops-sqlmesh-server-sg
+
+  SqlmeshPostgresSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ops-sqlmesh-postgres-sg
+      GroupDescription: Security group for SQLMesh PostgreSQL
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref SqlmeshServerSecurityGroup
+          Description: PostgreSQL from SQLMesh Server
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref AccessServerSecurityGroup
+          Description: PostgreSQL from Access Server
+      Tags:
+        - Key: Name
+          Value: ops-sqlmesh-postgres-sg
+
+  # VPC Peering Connection
+  VpcPeeringConnection:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId: !Ref VpcId
+      PeerVpcId: vpc-07ee3805f07edfac1
+      Tags:
+        - Key: Name
+          Value: ops-to-goodword-peering
+
+  # SSM Parameters for Secrets
+  DataOpsPostgresHostParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/ops/sqlmesh-postgres/host'
+      Type: String
+      Value: !Ref DataOpsPostgresHost
+      Description: 'SQLMesh PostgreSQL database host'
+
+  DataOpsPostgresPortParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/ops/sqlmesh-postgres/port'
+      Type: String
+      Value: !Ref DataOpsPostgresPort
+      Description: 'SQLMesh PostgreSQL database port'
+
+  DataOpsPostgresDatabaseParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/ops/sqlmesh-postgres/database'
+      Type: String
+      Value: sqlmesh_data
+      Description: 'SQLMesh PostgreSQL database name'
+
+  DataOpsPostgresUserParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/ops/sqlmesh-postgres/user'
+      Type: String
+      Value: !Ref DataOpsPostgresUser
+      Description: 'SQLMesh PostgreSQL username'
+
+  DataOpsPostgresPasswordParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/ops/sqlmesh-postgres/password'
+      Type: String
+      Value: !Ref DataOpsPostgresPassword
+      Description: 'SQLMesh PostgreSQL password'
+
+  TailscaleAuthKeyParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/ops/tailscale/auth-key'
+      Type: String
+      Value: !Ref TailscaleAuthKey
+      Description: 'Tailscale authentication key'
+
+  # Snowflake credentials
+  SnowflakeAccountParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/ops/snowflake/account'
+      Type: String
+      Value: !Ref SnowflakeAccount
+      Description: 'Snowflake account identifier'
+
+  SnowflakeUserParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/ops/snowflake/user'
+      Type: String
+      Value: !Ref SnowflakeUser
+      Description: 'Snowflake username'
+
+  SnowflakePasswordParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/ops/snowflake/password'
+      Type: String
+      Value: !Ref SnowflakePassword
+      Description: 'Snowflake password'
+
+  SnowflakeWarehouseParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/ops/snowflake/warehouse'
+      Type: String
+      Value: !Ref SnowflakeWarehouse
+      Description: 'Snowflake warehouse'
+
+  SnowflakeDatabaseParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/ops/snowflake/database'
+      Type: String
+      Value: !Ref SnowflakeDatabase
+      Description: 'Snowflake database'
+
+  SnowflakeSchemaParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/ops/snowflake/schema'
+      Type: String
+      Value: !Ref SnowflakeSchema
+      Description: 'Snowflake schema'
+
+  # VPC Endpoint for SQLMesh (Snowflake Integration)
+  SQLMeshVPCEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: VPC Endpoint Security Group for SQLMesh Snowflake Integration
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 172.22.0.0/16
+          Description: HTTPS from Operations VPC
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 172.20.0.0/16
+          Description: HTTPS from Goodword VPC (future peering)
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 100.64.0.0/10
+          Description: HTTPS from Tailscale network
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.0.0.0/8
+          Description: HTTPS from private networks
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 172.16.0.0/12
+          Description: HTTPS from private networks
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 192.168.0.0/16
+          Description: HTTPS from private networks
+        # Airbyte Cloud US IP addresses
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 34.106.109.131/32
+          Description: Airbyte Cloud GCP US West 3
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 34.106.196.165/32
+          Description: Airbyte Cloud GCP US West 3
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 34.106.60.246/32
+          Description: Airbyte Cloud GCP US West 3
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 34.106.229.69/32
+          Description: Airbyte Cloud GCP US West 3
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 34.106.127.139/32
+          Description: Airbyte Cloud GCP US West 3
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 34.106.218.58/32
+          Description: Airbyte Cloud GCP US West 3
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 34.106.115.240/32
+          Description: Airbyte Cloud GCP US West 3
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 34.106.225.141/32
+          Description: Airbyte Cloud GCP US West 3
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 34.33.7.0/29
+          Description: Airbyte Cloud GCP US Central 1
+      Tags:
+        - Key: Name
+          Value: ops-sqlmesh-vpc-endpoint-sg
+        - Key: Purpose
+          Value: SQLMesh VPC Endpoint Security
+
+  SQLMeshVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: com.amazonaws.us-east-2.execute-api
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref PrivateSubnetId
+      SecurityGroupIds:
+        - !Ref SQLMeshVPCEndpointSecurityGroup
+      PrivateDnsEnabled: true
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: 'execute-api:Invoke'
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: ops-sqlmesh-vpc-endpoint
+        - Key: Purpose
+          Value: SQLMesh Snowflake Integration
+
+Outputs:
+  AccessServerSecurityGroupId:
+    Description: Access Server Security Group ID
+    Value: !Ref AccessServerSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-AccessServerSecurityGroupId'
+  
+  SqlmeshServerSecurityGroupId:
+    Description: SQLMesh Server Security Group ID
+    Value: !Ref SqlmeshServerSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-SqlmeshServerSecurityGroupId'
+  
+  SqlmeshPostgresSecurityGroupId:
+    Description: SQLMesh PostgreSQL Security Group ID
+    Value: !Ref SqlmeshPostgresSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-SqlmeshPostgresSecurityGroupId'
+  
+  VpcPeeringConnectionId:
+    Description: VPC Peering Connection ID
+    Value: !Ref VpcPeeringConnection
+    Export:
+      Name: !Sub '${AWS::StackName}-VpcPeeringConnectionId'
+  
+  SQLMeshVPCEndpointId:
+    Description: SQLMesh VPC Endpoint ID
+    Value: !Ref SQLMeshVPCEndpoint
+    Export:
+      Name: !Sub '${AWS::StackName}-SQLMeshVPCEndpointId'
+  
+  SQLMeshVPCEndpointSecurityGroupId:
+    Description: SQLMesh VPC Endpoint Security Group ID
+    Value: !Ref SQLMeshVPCEndpointSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-SQLMeshVPCEndpointSecurityGroupId'

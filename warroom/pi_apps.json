@@ -1,0 +1,27 @@
+{
+    "AlignedStartTime": "2025-07-11T07:55:00-04:00",
+    "AlignedEndTime": "2025-07-11T11:55:00-04:00",
+    "Keys": [
+        {
+            "Dimensions": {
+                "db.application.id": "DDF420A051BEAFD1618D12327718B4F212603FD6",
+                "db.application.name": "Unknown"
+            },
+            "Total": 26.06898238747554
+        },
+        {
+            "Dimensions": {
+                "db.application.id": "AA6D901AD5533DED2DD7482EBEFD0679CE689779",
+                "db.application.name": "pgAdmin 4 - CONN:6454143"
+            },
+            "Total": 0.004598825831702544
+        },
+        {
+            "Dimensions": {
+                "db.application.id": "D5BD9554FC2299B5ADB21BAD34E67243B8575F23",
+                "db.application.name": "pgAdmin 4 - DB:postgres"
+            },
+            "Total": 0.002837573385518591
+        }
+    ]
+}
