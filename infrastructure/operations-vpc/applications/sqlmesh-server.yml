@@ -209,6 +209,14 @@ Resources:
           curl -L "https://github.com/docker/compose/releases/download/v2.20.0/docker-compose-Linux-x86_64" -o /usr/local/bin/docker-compose
           chmod +x /usr/local/bin/docker-compose
           
+          # Install Nginx for reverse proxy
+          dnf install -y nginx
+          systemctl enable nginx
+          
+          # Install Certbot for SSL certificates
+          dnf install -y epel-release
+          dnf install -y certbot python3-certbot-nginx
+          
           # Create SQLMesh configuration directory
           mkdir -p /home/ec2-user/sqlmesh
           chown ec2-user:ec2-user /home/ec2-user/sqlmesh
@@ -327,6 +335,119 @@ Resources:
           systemctl enable sqlmesh.service
           systemctl start sqlmesh.service
           
+          # Wait for SQLMesh to start
+          sleep 30
+          
+          # Create Nginx configuration for SQLMesh reverse proxy
+          cat > /etc/nginx/conf.d/sqlmesh.conf << 'EOF'
+          # Upstream configuration for SQLMesh
+          upstream sqlmesh_backend {
+              server 127.0.0.1:8000;
+          }
+          
+          # HTTP server - serve directly (no redirect)
+          server {
+              listen 80;
+              server_name sqlmesh.internal.goodword.cloud;
+              
+              # Let's Encrypt challenge location
+              location /.well-known/acme-challenge/ {
+                  root /var/www/html;
+              }
+              
+              # Serve SQLMesh UI directly on HTTP
+              location / {
+                  proxy_pass http://sqlmesh_backend;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_set_header X-Forwarded-Host $host;
+                  proxy_set_header X-Forwarded-Port $server_port;
+                  
+                  # WebSocket support
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  
+                  # Timeouts
+                  proxy_connect_timeout 60s;
+                  proxy_send_timeout 60s;
+                  proxy_read_timeout 60s;
+              }
+          }
+          
+          # HTTPS server
+          server {
+              listen 443 ssl http2;
+              server_name sqlmesh.internal.goodword.cloud;
+              
+              # SSL configuration (will be updated by Certbot)
+              ssl_certificate /etc/letsencrypt/live/sqlmesh.internal.goodword.cloud/fullchain.pem;
+              ssl_certificate_key /etc/letsencrypt/live/sqlmesh.internal.goodword.cloud/privkey.pem;
+              
+              # Modern SSL configuration
+              ssl_protocols TLSv1.2 TLSv1.3;
+              ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384;
+              ssl_prefer_server_ciphers off;
+              ssl_session_cache shared:SSL:10m;
+              ssl_session_timeout 10m;
+              
+              # Security headers
+              add_header X-Frame-Options DENY;
+              add_header X-Content-Type-Options nosniff;
+              add_header X-XSS-Protection "1; mode=block";
+              add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+              
+              # Proxy configuration
+              location / {
+                  proxy_pass http://sqlmesh_backend;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_set_header X-Forwarded-Host $host;
+                  proxy_set_header X-Forwarded-Port $server_port;
+                  
+                  # WebSocket support
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  
+                  # Timeouts
+                  proxy_connect_timeout 60s;
+                  proxy_send_timeout 60s;
+                  proxy_read_timeout 60s;
+              }
+              
+              # Health check endpoint
+              location /health {
+                  access_log off;
+                  return 200 "healthy\n";
+                  add_header Content-Type text/plain;
+              }
+          }
+          EOF
+          
+          # Create web root for Let's Encrypt challenges
+          mkdir -p /var/www/html
+          chown -R nginx:nginx /var/www/html
+          
+          # Start Nginx
+          systemctl start nginx
+          
+          # Wait for Nginx to start
+          sleep 5
+          
+          # Obtain SSL certificate using Let's Encrypt
+          certbot --nginx -d sqlmesh.internal.goodword.cloud --non-interactive --agree-tos --email admin@goodword.cloud --redirect
+          
+          # Set up automatic certificate renewal
+          echo "0 12 * * * /usr/bin/certbot renew --quiet" | crontab -
+          
+          # Restart Nginx to ensure SSL is working
+          systemctl restart nginx
+          
           # Install CloudWatch agent
           wget https://s3.amazonaws.com/amazoncloudwatch-agent/amazon_linux/amd64/latest/amazon-cloudwatch-agent.rpm
           sudo rpm -U ./amazon-cloudwatch-agent.rpm
@@ -347,6 +468,16 @@ Resources:
                       "file_path": "/var/log/docker.log",
                       "log_group_name": "/aws/ec2/ops-sqlmesh-server",
                       "log_stream_name": "{instance_id}/docker"
+                    },
+                    {
+                      "file_path": "/var/log/nginx/access.log",
+                      "log_group_name": "/aws/ec2/ops-sqlmesh-server",
+                      "log_stream_name": "{instance_id}/nginx-access"
+                    },
+                    {
+                      "file_path": "/var/log/nginx/error.log",
+                      "log_group_name": "/aws/ec2/ops-sqlmesh-server",
+                      "log_stream_name": "{instance_id}/nginx-error"
                     }
                   ]
                 }
@@ -384,6 +515,18 @@ Outputs:
     Value: !GetAtt SqlmeshServer.PrivateIp
     Export:
       Name: !Sub '${AWS::StackName}-SqlmeshServerPrivateIP'
+  
+  SqlmeshServerHTTPSUrl:
+    Description: SQLMesh Server HTTPS URL
+    Value: !Sub 'https://sqlmesh.internal.goodword.cloud'
+    Export:
+      Name: !Sub '${AWS::StackName}-SqlmeshServerHTTPSUrl'
+  
+  SqlmeshServerHTTPUrl:
+    Description: SQLMesh Server HTTP URL (redirects to HTTPS)
+    Value: !Sub 'http://sqlmesh.internal.goodword.cloud'
+    Export:
+      Name: !Sub '${AWS::StackName}-SqlmeshServerHTTPUrl'
   
   SqlmeshArtifactsBucketName:
     Description: SQLMesh Artifacts S3 Bucket Name

@@ -202,6 +202,12 @@ deploy_all() {
         "VpcId=$vpc_id PrivateSubnetId=$private_subnet_id SqlmeshServerSecurityGroupId=$sqlmesh_sg_id DataOpsPostgresHost=$postgres_host DataOpsPostgresPort=$SQLMESH_POSTGRES_PORT DataOpsPostgresUser=$SQLMESH_POSTGRES_USER DataOpsPostgresPassword=$SQLMESH_POSTGRES_PASSWORD DataOpsPostgresDatabase=$SQLMESH_POSTGRES_DATABASE SnowflakeAccount=$SNOWFLAKE_ACCOUNT SnowflakeUser=$SNOWFLAKE_USER SnowflakePassword=$SNOWFLAKE_PASSWORD SnowflakeWarehouse=$SNOWFLAKE_WAREHOUSE SnowflakeDatabase=$SNOWFLAKE_DATABASE SnowflakeSchema=$SNOWFLAKE_SCHEMA"
     wait_for_stack "${STACK_PREFIX}-sqlmesh-server"
     
+    # Deploy DNS layer
+    log "Phase 4: Deploying DNS layer..."
+    deploy_stack "goodword-dns" "${TEMPLATE_DIR}../infrastructure/operations-vpc/dns/dns.yml" \
+        "VpcId=$vpc_id Environment=$ENVIRONMENT PublicHostedZoneId=Z04032891ZM6L7J3T40M7"
+    wait_for_stack "goodword-dns"
+    
     log_success "All stacks deployed successfully!"
     
     # Display outputs
@@ -228,6 +234,8 @@ show_help() {
     echo "  --operations-host  Deploy only operations host"
     echo "  --sqlmesh-server   Deploy only SQLMesh server"
     echo "  --sqlmesh-db       Deploy only SQLMesh database"
+    echo "  --dns              Deploy only DNS configuration"
+    echo "  --ssl-setup        Set up SSL certificate for SQLMesh server"
     echo "  --status           Show status of all stacks"
     echo "  --help             Show this help message"
     echo ""
@@ -242,7 +250,7 @@ show_help() {
 show_status() {
     log "Checking stack status..."
     
-    local stacks=("${STACK_PREFIX}-networking" "${STACK_PREFIX}-security" "${STACK_PREFIX}-sqlmesh-db" "${STACK_PREFIX}-operations-host" "${STACK_PREFIX}-sqlmesh-server")
+    local stacks=("${STACK_PREFIX}-networking" "${STACK_PREFIX}-security" "${STACK_PREFIX}-sqlmesh-db" "${STACK_PREFIX}-operations-host" "${STACK_PREFIX}-sqlmesh-server" "goodword-dns")
     
     for stack in "${stacks[@]}"; do
         local status=$(check_stack_status "$stack")
@@ -252,6 +260,33 @@ show_status() {
             log "Stack $stack: $status"
         fi
     done
+}
+
+# Function to set up SSL certificate
+setup_ssl() {
+    log "Setting up SSL certificate for SQLMesh server..."
+    
+    # Check if ssl-manager.sh exists
+    if [ ! -f "./scripts/ssl-manager.sh" ]; then
+        log_error "SSL manager script not found at ./scripts/ssl-manager.sh"
+        exit 1
+    fi
+    
+    # Make it executable
+    chmod +x ./scripts/ssl-manager.sh
+    
+    # Run SSL setup
+    log "Running SSL certificate setup..."
+    ./scripts/ssl-manager.sh setup
+    
+    if [ $? -eq 0 ]; then
+        log_success "SSL certificate setup completed successfully!"
+        log "You can now access SQLMesh at: https://sqlmesh.internal.goodword.cloud"
+    else
+        log_warning "SSL certificate setup encountered issues"
+        log "You can retry with: ./scripts/ssl-manager.sh retry"
+        log "Or check DNS propagation with: ./scripts/ssl-manager.sh check"
+    fi
 }
 
 # Main script logic
@@ -311,6 +346,16 @@ case "${1:-}" in
         get_secrets_from_aws
         deploy_stack "${STACK_PREFIX}-sqlmesh-db" "${TEMPLATE_DIR}data/sqlmesh-db.yml" \
             "SqlmeshPostgresPassword=$SQLMESH_POSTGRES_PASSWORD"
+        ;;
+    --dns)
+        check_aws_cli
+        # Get VPC ID from networking stack
+        vpc_id=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-networking" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`VpcId`].OutputValue' --output text)
+        deploy_stack "goodword-dns" "${TEMPLATE_DIR}../infrastructure/operations-vpc/dns/dns.yml" \
+            "VpcId=$vpc_id Environment=$ENVIRONMENT PublicHostedZoneId=Z04032891ZM6L7J3T40M7"
+        ;;
+    --ssl-setup)
+        setup_ssl
         ;;
     --status)
         show_status

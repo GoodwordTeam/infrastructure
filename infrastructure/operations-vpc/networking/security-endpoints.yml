@@ -134,6 +134,16 @@ Resources:
           ToPort: 8000
           SourceSecurityGroupId: !Ref AccessServerSecurityGroup
           Description: SQLMesh UI from Access Server
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref AccessServerSecurityGroup
+          Description: HTTP for Let's Encrypt challenges from Access Server
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref AccessServerSecurityGroup
+          Description: HTTPS for SQLMesh UI from Access Server
       Tags:
         - Key: Name
           Value: ops-sqlmesh-server-sg
