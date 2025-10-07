@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  sqlmesh:
+    image: tobikodata/sqlmesh:latest
+    container_name: sqlmesh-server
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - SQLMESH_CONFIG_PATH=/app/config.yaml
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - sqlmesh_data:/app/data
+    networks:
+      - sqlmesh_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  sqlmesh_data:
+    driver: local
+
+networks:
+  sqlmesh_network:
+    driver: bridge
