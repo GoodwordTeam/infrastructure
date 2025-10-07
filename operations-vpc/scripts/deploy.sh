@@ -163,13 +163,13 @@ deploy_all() {
     
     # Deploy networking layer
     log "Phase 1: Deploying networking layer..."
-    deploy_stack "${STACK_PREFIX}-networking" "${TEMPLATE_DIR}networking/vpc-subnets.yml"
+    deploy_stack "${STACK_PREFIX}-networking" "${TEMPLATE_DIR}infrastructure/networking/vpc-subnets.yml"
     wait_for_stack "${STACK_PREFIX}-networking"
     
     # Get VPC ID from networking stack
     vpc_id=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-networking" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`VpcId`].OutputValue' --output text)
     
-    deploy_stack "${STACK_PREFIX}-security" "${TEMPLATE_DIR}networking/security-groups.yml" \
+    deploy_stack "${STACK_PREFIX}-security" "${TEMPLATE_DIR}infrastructure/networking/security-endpoints.yml" \
         "VpcId=$vpc_id DataOpsPostgresHost=$SQLMESH_POSTGRES_HOST DataOpsPostgresPort=$SQLMESH_POSTGRES_PORT DataOpsPostgresUser=$SQLMESH_POSTGRES_USER DataOpsPostgresPassword=$SQLMESH_POSTGRES_PASSWORD SnowflakeAccount=$SNOWFLAKE_ACCOUNT SnowflakeUser=$SNOWFLAKE_USER SnowflakePassword=$SNOWFLAKE_PASSWORD SnowflakeWarehouse=$SNOWFLAKE_WAREHOUSE SnowflakeDatabase=$SNOWFLAKE_DATABASE SnowflakeSchema=$SNOWFLAKE_SCHEMA TailscaleAuthKey=$TAILSCALE_AUTH_KEY"
     wait_for_stack "${STACK_PREFIX}-security"
     
@@ -179,9 +179,9 @@ deploy_all() {
     data_subnet1_id=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-networking" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`DataSubnet1Id`].OutputValue' --output text)
     data_subnet2_id=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-networking" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`DataSubnet2Id`].OutputValue' --output text)
     postgres_sg_id=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-security" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`SqlmeshPostgresSecurityGroupId`].OutputValue' --output text)
-    deploy_stack "${STACK_PREFIX}-sqlmesh-db" "${TEMPLATE_DIR}data/sqlmesh-db.yml" \
+    deploy_stack "${STACK_PREFIX}-operations-db" "${TEMPLATE_DIR}infrastructure/data/operations-db.yml" \
         "VpcId=$vpc_id DataSubnet1Id=$data_subnet1_id DataSubnet2Id=$data_subnet2_id SqlmeshPostgresSecurityGroupId=$postgres_sg_id SqlmeshPostgresPassword=$SQLMESH_POSTGRES_PASSWORD"
-    wait_for_stack "${STACK_PREFIX}-sqlmesh-db"
+    wait_for_stack "${STACK_PREFIX}-operations-db"
     
     # Deploy applications layer
     log "Phase 3: Deploying applications layer..."
@@ -190,15 +190,15 @@ deploy_all() {
     private_subnet_id=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-networking" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`PrivateSubnetId`].OutputValue' --output text)
     access_sg_id=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-security" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`AccessServerSecurityGroupId`].OutputValue' --output text)
     sqlmesh_sg_id=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-security" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`SqlmeshServerSecurityGroupId`].OutputValue' --output text)
-    postgres_host=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-sqlmesh-db" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`SqlmeshPostgresEndpoint`].OutputValue' --output text)
+    postgres_host=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-operations-db" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`SqlmeshPostgresEndpoint`].OutputValue' --output text)
     
     # Deploy Operations Host
-    deploy_stack "${STACK_PREFIX}-operations-host" "${TEMPLATE_DIR}applications/operations-host.yml" \
+    deploy_stack "${STACK_PREFIX}-operations-host" "${TEMPLATE_DIR}services/operations-host/operations-host.yml" \
         "VpcId=$vpc_id PublicSubnetId=$public_subnet_id AccessServerSecurityGroupId=$access_sg_id TailscaleAuthKey=$TAILSCALE_AUTH_KEY"
     wait_for_stack "${STACK_PREFIX}-operations-host"
     
     # Deploy SQLMesh Server
-    deploy_stack "${STACK_PREFIX}-sqlmesh-server" "${TEMPLATE_DIR}applications/sqlmesh-server.yml" \
+    deploy_stack "${STACK_PREFIX}-sqlmesh-server" "${TEMPLATE_DIR}services/sqlmesh/sqlmesh-server.yml" \
         "VpcId=$vpc_id PrivateSubnetId=$private_subnet_id SqlmeshServerSecurityGroupId=$sqlmesh_sg_id DataOpsPostgresHost=$postgres_host DataOpsPostgresPort=$SQLMESH_POSTGRES_PORT DataOpsPostgresUser=$SQLMESH_POSTGRES_USER DataOpsPostgresPassword=$SQLMESH_POSTGRES_PASSWORD DataOpsPostgresDatabase=$SQLMESH_POSTGRES_DATABASE SnowflakeAccount=$SNOWFLAKE_ACCOUNT SnowflakeUser=$SNOWFLAKE_USER SnowflakePassword=$SNOWFLAKE_PASSWORD SnowflakeWarehouse=$SNOWFLAKE_WAREHOUSE SnowflakeDatabase=$SNOWFLAKE_DATABASE SnowflakeSchema=$SNOWFLAKE_SCHEMA"
     wait_for_stack "${STACK_PREFIX}-sqlmesh-server"
     
@@ -214,7 +214,7 @@ deploy_all() {
     log "Retrieving stack outputs..."
     aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-networking" --region "$REGION" --query 'Stacks[0].Outputs' --output table
     aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-security" --region "$REGION" --query 'Stacks[0].Outputs' --output table
-    aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-sqlmesh-db" --region "$REGION" --query 'Stacks[0].Outputs' --output table
+    aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-operations-db" --region "$REGION" --query 'Stacks[0].Outputs' --output table
     aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-operations-host" --region "$REGION" --query 'Stacks[0].Outputs' --output table
     aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-sqlmesh-server" --region "$REGION" --query 'Stacks[0].Outputs' --output table
 }
@@ -233,7 +233,7 @@ show_help() {
     echo "  --applications     Deploy only applications layer (both EC2 instances)"
     echo "  --operations-host  Deploy only operations host"
     echo "  --sqlmesh-server   Deploy only SQLMesh server"
-    echo "  --sqlmesh-db       Deploy only SQLMesh database"
+    echo "  --operations-db       Deploy only SQLMesh database"
     echo "  --dns              Deploy only DNS configuration"
     echo "  --ssl-setup        Set up SSL certificate for SQLMesh server"
     echo "  --status           Show status of all stacks"
@@ -250,7 +250,7 @@ show_help() {
 show_status() {
     log "Checking stack status..."
     
-    local stacks=("${STACK_PREFIX}-networking" "${STACK_PREFIX}-security" "${STACK_PREFIX}-sqlmesh-db" "${STACK_PREFIX}-operations-host" "${STACK_PREFIX}-sqlmesh-server" "goodword-dns")
+    local stacks=("${STACK_PREFIX}-networking" "${STACK_PREFIX}-security" "${STACK_PREFIX}-operations-db" "${STACK_PREFIX}-operations-host" "${STACK_PREFIX}-sqlmesh-server" "goodword-dns")
     
     for stack in "${stacks[@]}"; do
         local status=$(check_stack_status "$stack")
@@ -295,14 +295,14 @@ case "${1:-}" in
         deploy_all
         ;;
     --networking)
-        deploy_stack "${STACK_PREFIX}-networking" "${TEMPLATE_DIR}networking/vpc-subnets.yml"
+        deploy_stack "${STACK_PREFIX}-networking" "${TEMPLATE_DIR}infrastructure/networking/vpc-subnets.yml"
         ;;
     --security)
         check_aws_cli
         get_secrets_from_aws
         # Get VPC ID from networking stack
         vpc_id=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-networking" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`VpcId`].OutputValue' --output text)
-        deploy_stack "${STACK_PREFIX}-security" "${TEMPLATE_DIR}networking/security-groups.yml" \
+        deploy_stack "${STACK_PREFIX}-security" "${TEMPLATE_DIR}infrastructure/networking/security-endpoints.yml" \
             "VpcId=$vpc_id DataOpsPostgresHost=$SQLMESH_POSTGRES_HOST DataOpsPostgresPort=$SQLMESH_POSTGRES_PORT DataOpsPostgresUser=$SQLMESH_POSTGRES_USER DataOpsPostgresPassword=$SQLMESH_POSTGRES_PASSWORD SnowflakeAccount=$SNOWFLAKE_ACCOUNT SnowflakeUser=$SNOWFLAKE_USER SnowflakePassword=$SNOWFLAKE_PASSWORD SnowflakeWarehouse=$SNOWFLAKE_WAREHOUSE SnowflakeDatabase=$SNOWFLAKE_DATABASE SnowflakeSchema=$SNOWFLAKE_SCHEMA TailscaleAuthKey=$TAILSCALE_AUTH_KEY"
         ;;
     --data)
@@ -313,7 +313,7 @@ case "${1:-}" in
         data_subnet1_id=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-networking" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`DataSubnet1Id`].OutputValue' --output text)
         data_subnet2_id=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-networking" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`DataSubnet2Id`].OutputValue' --output text)
         postgres_sg_id=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-security" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`SqlmeshPostgresSecurityGroupId`].OutputValue' --output text)
-        deploy_stack "${STACK_PREFIX}-sqlmesh-db" "${TEMPLATE_DIR}data/sqlmesh-db.yml" \
+        deploy_stack "${STACK_PREFIX}-operations-db" "${TEMPLATE_DIR}infrastructure/data/operations-db.yml" \
             "VpcId=$vpc_id DataSubnet1Id=$data_subnet1_id DataSubnet2Id=$data_subnet2_id SqlmeshPostgresSecurityGroupId=$postgres_sg_id SqlmeshPostgresPassword=$SQLMESH_POSTGRES_PASSWORD"
         ;;
     --applications)
@@ -325,26 +325,26 @@ case "${1:-}" in
         private_subnet_id=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-networking" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`PrivateSubnetId`].OutputValue' --output text)
         access_sg_id=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-security" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`AccessServerSecurityGroupId`].OutputValue' --output text)
         sqlmesh_sg_id=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-security" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`SqlmeshServerSecurityGroupId`].OutputValue' --output text)
-        postgres_host=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-sqlmesh-db" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`SqlmeshPostgresEndpoint`].OutputValue' --output text)
+        postgres_host=$(aws cloudformation describe-stacks --stack-name "${STACK_PREFIX}-operations-db" --region "$REGION" --query 'Stacks[0].Outputs[?OutputKey==`SqlmeshPostgresEndpoint`].OutputValue' --output text)
         
         # Deploy Operations Host
-        deploy_stack "${STACK_PREFIX}-operations-host" "${TEMPLATE_DIR}applications/operations-host.yml" \
+        deploy_stack "${STACK_PREFIX}-operations-host" "${TEMPLATE_DIR}services/operations-host/operations-host.yml" \
             "VpcId=$vpc_id PublicSubnetId=$public_subnet_id AccessServerSecurityGroupId=$access_sg_id TailscaleAuthKey=$TAILSCALE_AUTH_KEY"
         
         # Deploy SQLMesh Server
-        deploy_stack "${STACK_PREFIX}-sqlmesh-server" "${TEMPLATE_DIR}applications/sqlmesh-server.yml" \
+        deploy_stack "${STACK_PREFIX}-sqlmesh-server" "${TEMPLATE_DIR}services/sqlmesh/sqlmesh-server.yml" \
             "VpcId=$vpc_id PrivateSubnetId=$private_subnet_id SqlmeshServerSecurityGroupId=$sqlmesh_sg_id DataOpsPostgresHost=$postgres_host DataOpsPostgresPort=$SQLMESH_POSTGRES_PORT DataOpsPostgresUser=$SQLMESH_POSTGRES_USER DataOpsPostgresPassword=$SQLMESH_POSTGRES_PASSWORD DataOpsPostgresDatabase=$SQLMESH_POSTGRES_DATABASE SnowflakeAccount=$SNOWFLAKE_ACCOUNT SnowflakeUser=$SNOWFLAKE_USER SnowflakePassword=$SNOWFLAKE_PASSWORD SnowflakeWarehouse=$SNOWFLAKE_WAREHOUSE SnowflakeDatabase=$SNOWFLAKE_DATABASE SnowflakeSchema=$SNOWFLAKE_SCHEMA"
         ;;
     --operations-host)
-        deploy_stack "${STACK_PREFIX}-operations-host" "${TEMPLATE_DIR}applications/operations-host.yml"
+        deploy_stack "${STACK_PREFIX}-operations-host" "${TEMPLATE_DIR}services/operations-host/operations-host.yml"
         ;;
     --sqlmesh-server)
-        deploy_stack "${STACK_PREFIX}-sqlmesh-server" "${TEMPLATE_DIR}applications/sqlmesh-server.yml"
+        deploy_stack "${STACK_PREFIX}-sqlmesh-server" "${TEMPLATE_DIR}services/sqlmesh/sqlmesh-server.yml"
         ;;
-    --sqlmesh-db)
+    --operations-db)
         check_aws_cli
         get_secrets_from_aws
-        deploy_stack "${STACK_PREFIX}-sqlmesh-db" "${TEMPLATE_DIR}data/sqlmesh-db.yml" \
+        deploy_stack "${STACK_PREFIX}-operations-db" "${TEMPLATE_DIR}infrastructure/data/operations-db.yml" \
             "SqlmeshPostgresPassword=$SQLMESH_POSTGRES_PASSWORD"
         ;;
     --dns)
