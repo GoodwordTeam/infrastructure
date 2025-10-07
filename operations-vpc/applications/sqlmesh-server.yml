@@ -1,0 +1,535 @@
+# SQLMesh Server - EC2 Instance with Docker and SQLMesh
+# This file contains:
+# - SQLMesh Server EC2 instance (t3.medium)
+# - IAM role and policies
+# - S3 bucket for artifacts
+# - CloudWatch logging
+# - Docker + SQLMesh setup
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'SQLMesh Server - EC2 Instance with Docker and SQLMesh'
+
+Parameters:
+  VpcId:
+    Type: String
+    Description: VPC ID
+  
+  PrivateSubnetId:
+    Type: String
+    Description: Private Subnet ID
+  
+  SqlmeshServerSecurityGroupId:
+    Type: String
+    Description: SQLMesh Server Security Group ID
+  
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: ops-vpc-key
+    Description: Name of the EC2 KeyPair to enable SSH access
+  
+  # Database credentials
+  DataOpsPostgresHost:
+    Type: String
+    Description: Data Operations PostgreSQL host
+    NoEcho: true
+  
+  DataOpsPostgresPort:
+    Type: String
+    Description: Data Operations PostgreSQL port
+    NoEcho: true
+  
+  DataOpsPostgresUser:
+    Type: String
+    Description: Data Operations PostgreSQL username
+    NoEcho: true
+  
+  DataOpsPostgresPassword:
+    Type: String
+    Description: Data Operations PostgreSQL password
+    NoEcho: true
+  
+  DataOpsPostgresDatabase:
+    Type: String
+    Description: Data Operations PostgreSQL database
+    NoEcho: true
+  
+  # Snowflake credentials
+  SnowflakeAccount:
+    Type: String
+    Description: Snowflake account identifier
+    NoEcho: true
+  
+  SnowflakeUser:
+    Type: String
+    Description: Snowflake username
+    NoEcho: true
+  
+  SnowflakePassword:
+    Type: String
+    Description: Snowflake password
+    NoEcho: true
+  
+  SnowflakeWarehouse:
+    Type: String
+    Description: Snowflake warehouse
+    NoEcho: true
+  
+  SnowflakeDatabase:
+    Type: String
+    Description: Snowflake database
+    NoEcho: true
+  
+  SnowflakeSchema:
+    Type: String
+    Description: Snowflake schema
+    NoEcho: true
+
+Resources:
+  # S3 Bucket for SQLMesh Artifacts
+  SqlmeshArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'ops-sqlmesh-artifacts-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: ops-sqlmesh-artifacts
+        - Key: Purpose
+          Value: SQLMesh Artifacts Storage
+
+  # IAM Role for SQLMesh Server
+  SqlmeshServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ops-sqlmesh-server-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: SSMParameterAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ops/*'
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt SqlmeshArtifactsBucket.Arn
+                  - !Sub '${SqlmeshArtifactsBucket.Arn}/*'
+      Tags:
+        - Key: Name
+          Value: ops-sqlmesh-server-role
+
+  # Instance Profile
+  SqlmeshServerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref SqlmeshServerRole
+
+  # SQLMesh Server EC2 Instance
+  SqlmeshServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-077b630ef539aa0b5
+      InstanceType: t3.medium
+      KeyName: !Ref KeyPairName
+      SubnetId: !Ref PrivateSubnetId
+      SecurityGroupIds:
+        - !Ref SqlmeshServerSecurityGroupId
+      IamInstanceProfile: !Ref SqlmeshServerInstanceProfile
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # Update system packages
+          dnf update -y
+          
+          # Add SSH keys for both cfischer and ops access
+          echo "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCtQMJfj78FA8eI+kovopx8AjPXRYr7NmaPy6e80kMzJPqkuafm6TCI9OdaOpexojmRi4jA7QmvyOi6MLtIkwDL2ZyJC3iJG6DnLntX/Gv/Ohiqy8Xq3n7lpGeQT8DaJh6Htj4rKIbOKX+XUABUU+EBqUNMQWzCfq0eFRZih4J7UgqYxXdfEnctl/4Kfu0mL8X6AlbzZ+N3EWQMBKwVfZ+9SeYjf00XRXL0YV1uL4w4tvD5UU8pWqLuwfYWaaaTN9Iu7RbYWzUA5mItZ6CPur67IdqRZ8gsqRJKO+P9PfgDx68KXDZlcYI0iNXrl6ZM8YKZQz8vGwfZb3TTCyUnhnOj ops-vpc-key" >> /home/ec2-user/.ssh/authorized_keys
+          # TODO: Add cfischer public key here when available
+          
+          # Install Docker
+          dnf install -y docker
+          systemctl enable docker
+          systemctl start docker
+          usermod -a -G docker ec2-user
+          
+          # Install SnowSQL (Snowflake CLI)
+          # Download and install SnowSQL RPM package
+          cd /tmp
+          wget https://sfc-repo.snowflakecomputing.com/snowsql/bootstrap/1.2/linux_x86_64/snowsql-1.2.26-linux_x86_64.rpm
+          dnf install -y snowsql-1.2.26-linux_x86_64.rpm
+          
+          # Create SnowSQL configuration directory
+          mkdir -p /home/ec2-user/.snowsql
+          chown ec2-user:ec2-user /home/ec2-user/.snowsql
+          
+          # Create SnowSQL config file with connection details
+          cat > /home/ec2-user/.snowsql/config << 'EOF'
+          [connections.goodword]
+          accountname = ${SnowflakeAccount}
+          username = ${SnowflakeUser}
+          password = ${SnowflakePassword}
+          dbname = ${SnowflakeDatabase}
+          schemaname = ${SnowflakeSchema}
+          warehousename = ${SnowflakeWarehouse}
+          rolename = ACCOUNTADMIN
+          EOF
+          
+          chown ec2-user:ec2-user /home/ec2-user/.snowsql/config
+          
+          # Install Docker Compose
+          curl -L "https://github.com/docker/compose/releases/download/v2.20.0/docker-compose-Linux-x86_64" -o /usr/local/bin/docker-compose
+          chmod +x /usr/local/bin/docker-compose
+          
+          # Install Nginx for reverse proxy
+          dnf install -y nginx
+          systemctl enable nginx
+          
+          # Install Certbot for SSL certificates
+          dnf install -y epel-release
+          dnf install -y certbot python3-certbot-nginx
+          
+          # Create SQLMesh configuration directory
+          mkdir -p /home/ec2-user/sqlmesh
+          chown ec2-user:ec2-user /home/ec2-user/sqlmesh
+          
+          # Create SQLMesh config.yaml
+          cat > /home/ec2-user/sqlmesh/config.yaml << 'EOF'
+          default_environment: dev
+          environments:
+            - name: dev
+              default: true
+            - name: prod
+          gateways:
+            snowflake:
+              type: snowflake
+              account: ${SnowflakeAccount}
+              user: ${SnowflakeUser}
+              password: ${SnowflakePassword}
+              warehouse: ${SnowflakeWarehouse}
+              database: ${SnowflakeDatabase}
+              schema: ${SnowflakeSchema}
+            postgres:
+              type: postgres
+              host: ${DataOpsPostgresHost}
+              port: ${DataOpsPostgresPort}
+              user: ${DataOpsPostgresUser}
+              password: ${DataOpsPostgresPassword}
+              database: ${DataOpsPostgresDatabase}
+          storage:
+            type: s3
+            bucket: ${SqlmeshArtifactsBucket}
+            prefix: sqlmesh
+          EOF
+          
+          # Create Dockerfile for SQLMesh
+          cat > /home/ec2-user/sqlmesh/Dockerfile << 'EOF'
+          FROM python:3.11-slim
+
+          WORKDIR /app
+
+          # Install SQLMesh with web dependencies
+          RUN pip install "sqlmesh[web]"
+
+          # Copy configuration and models
+          COPY config.yaml /app/config.yaml
+          COPY models /app/models
+          COPY tests /app/tests
+
+          # Expose port
+          EXPOSE 8000
+
+          # Start SQLMesh UI
+          CMD ["sqlmesh", "ui", "--host", "0.0.0.0", "--port", "8000"]
+          EOF
+          
+          # Create docker-compose.yml for SQLMesh
+          cat > /home/ec2-user/sqlmesh/docker-compose.yml << 'EOF'
+          version: '3.8'
+          services:
+            sqlmesh:
+              build: .
+              container_name: sqlmesh
+              ports:
+                - "8000:8000"
+              volumes:
+                - ./config.yaml:/app/config.yaml
+                - ./models:/app/models
+                - ./tests:/app/tests
+              environment:
+                - SQLMESH_CONFIG_PATH=/app/config.yaml
+              restart: unless-stopped
+          EOF
+          
+          # Create basic model structure
+          mkdir -p /home/ec2-user/sqlmesh/models
+          mkdir -p /home/ec2-user/sqlmesh/tests
+          
+          # Create a sample model
+          cat > /home/ec2-user/sqlmesh/models/sample_model.sql << 'EOF'
+          MODEL (
+            name sample_model,
+            kind FULL,
+            cron '@daily'
+          );
+          
+          SELECT 1 as id, 'test' as name;
+          EOF
+          
+          # Set ownership
+          chown -R ec2-user:ec2-user /home/ec2-user/sqlmesh
+          
+          # Start SQLMesh
+          cd /home/ec2-user/sqlmesh
+          docker-compose up -d
+          
+          # Create systemd service for SQLMesh to start on boot
+          cat > /etc/systemd/system/sqlmesh.service << 'EOF'
+          [Unit]
+          Description=SQLMesh UI Service
+          Requires=docker.service
+          After=docker.service
+          
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          WorkingDirectory=/home/ec2-user/sqlmesh
+          ExecStart=/usr/local/bin/docker-compose up -d
+          ExecStop=/usr/local/bin/docker-compose down
+          User=ec2-user
+          Group=ec2-user
+          
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          
+          # Enable and start SQLMesh service
+          systemctl enable sqlmesh.service
+          systemctl start sqlmesh.service
+          
+          # Wait for SQLMesh to start
+          sleep 30
+          
+          # Create Nginx configuration for SQLMesh reverse proxy
+          cat > /etc/nginx/conf.d/sqlmesh.conf << 'EOF'
+          # Upstream configuration for SQLMesh
+          upstream sqlmesh_backend {
+              server 127.0.0.1:8000;
+          }
+          
+          # HTTP server - serve directly (no redirect)
+          server {
+              listen 80;
+              server_name sqlmesh.internal.goodword.cloud;
+              
+              # Let's Encrypt challenge location
+              location /.well-known/acme-challenge/ {
+                  root /var/www/html;
+              }
+              
+              # Serve SQLMesh UI directly on HTTP
+              location / {
+                  proxy_pass http://sqlmesh_backend;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_set_header X-Forwarded-Host $host;
+                  proxy_set_header X-Forwarded-Port $server_port;
+                  
+                  # WebSocket support
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  
+                  # Timeouts
+                  proxy_connect_timeout 60s;
+                  proxy_send_timeout 60s;
+                  proxy_read_timeout 60s;
+              }
+          }
+          
+          # HTTPS server
+          server {
+              listen 443 ssl http2;
+              server_name sqlmesh.internal.goodword.cloud;
+              
+              # SSL configuration (will be updated by Certbot)
+              ssl_certificate /etc/letsencrypt/live/sqlmesh.internal.goodword.cloud/fullchain.pem;
+              ssl_certificate_key /etc/letsencrypt/live/sqlmesh.internal.goodword.cloud/privkey.pem;
+              
+              # Modern SSL configuration
+              ssl_protocols TLSv1.2 TLSv1.3;
+              ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384;
+              ssl_prefer_server_ciphers off;
+              ssl_session_cache shared:SSL:10m;
+              ssl_session_timeout 10m;
+              
+              # Security headers
+              add_header X-Frame-Options DENY;
+              add_header X-Content-Type-Options nosniff;
+              add_header X-XSS-Protection "1; mode=block";
+              add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+              
+              # Proxy configuration
+              location / {
+                  proxy_pass http://sqlmesh_backend;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_set_header X-Forwarded-Host $host;
+                  proxy_set_header X-Forwarded-Port $server_port;
+                  
+                  # WebSocket support
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  
+                  # Timeouts
+                  proxy_connect_timeout 60s;
+                  proxy_send_timeout 60s;
+                  proxy_read_timeout 60s;
+              }
+              
+              # Health check endpoint
+              location /health {
+                  access_log off;
+                  return 200 "healthy\n";
+                  add_header Content-Type text/plain;
+              }
+          }
+          EOF
+          
+          # Create web root for Let's Encrypt challenges
+          mkdir -p /var/www/html
+          chown -R nginx:nginx /var/www/html
+          
+          # Start Nginx
+          systemctl start nginx
+          
+          # Wait for Nginx to start
+          sleep 5
+          
+          # Obtain SSL certificate using Let's Encrypt
+          certbot --nginx -d sqlmesh.internal.goodword.cloud --non-interactive --agree-tos --email admin@goodword.cloud --redirect
+          
+          # Set up automatic certificate renewal
+          echo "0 12 * * * /usr/bin/certbot renew --quiet" | crontab -
+          
+          # Restart Nginx to ensure SSL is working
+          systemctl restart nginx
+          
+          # Install CloudWatch agent
+          wget https://s3.amazonaws.com/amazoncloudwatch-agent/amazon_linux/amd64/latest/amazon-cloudwatch-agent.rpm
+          sudo rpm -U ./amazon-cloudwatch-agent.rpm
+          
+          # Create CloudWatch config
+          cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << 'EOF'
+          {
+            "logs": {
+              "logs_collected": {
+                "files": {
+                  "collect_list": [
+                    {
+                      "file_path": "/var/log/messages",
+                      "log_group_name": "/aws/ec2/ops-sqlmesh-server",
+                      "log_stream_name": "{instance_id}/messages"
+                    },
+                    {
+                      "file_path": "/var/log/docker.log",
+                      "log_group_name": "/aws/ec2/ops-sqlmesh-server",
+                      "log_stream_name": "{instance_id}/docker"
+                    },
+                    {
+                      "file_path": "/var/log/nginx/access.log",
+                      "log_group_name": "/aws/ec2/ops-sqlmesh-server",
+                      "log_stream_name": "{instance_id}/nginx-access"
+                    },
+                    {
+                      "file_path": "/var/log/nginx/error.log",
+                      "log_group_name": "/aws/ec2/ops-sqlmesh-server",
+                      "log_stream_name": "{instance_id}/nginx-error"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+          EOF
+          
+          # Start CloudWatch agent
+          /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+            -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
+          
+      Tags:
+        - Key: Name
+          Value: ops-sqlmesh-server
+        - Key: Purpose
+          Value: SQLMesh Server
+
+  # CloudWatch Log Group
+  SqlmeshServerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/ec2/ops-sqlmesh-server
+      RetentionInDays: 14
+
+Outputs:
+  SqlmeshServerInstanceId:
+    Description: SQLMesh Server Instance ID
+    Value: !Ref SqlmeshServer
+    Export:
+      Name: !Sub '${AWS::StackName}-SqlmeshServerInstanceId'
+  
+  SqlmeshServerPrivateIP:
+    Description: SQLMesh Server Private IP
+    Value: !GetAtt SqlmeshServer.PrivateIp
+    Export:
+      Name: !Sub '${AWS::StackName}-SqlmeshServerPrivateIP'
+  
+  SqlmeshServerHTTPSUrl:
+    Description: SQLMesh Server HTTPS URL
+    Value: !Sub 'https://sqlmesh.internal.goodword.cloud'
+    Export:
+      Name: !Sub '${AWS::StackName}-SqlmeshServerHTTPSUrl'
+  
+  SqlmeshServerHTTPUrl:
+    Description: SQLMesh Server HTTP URL (redirects to HTTPS)
+    Value: !Sub 'http://sqlmesh.internal.goodword.cloud'
+    Export:
+      Name: !Sub '${AWS::StackName}-SqlmeshServerHTTPUrl'
+  
+  SqlmeshArtifactsBucketName:
+    Description: SQLMesh Artifacts S3 Bucket Name
+    Value: !Ref SqlmeshArtifactsBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-SqlmeshArtifactsBucketName'

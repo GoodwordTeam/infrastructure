@@ -1,0 +1,356 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Comprehensive DNS configuration for goodword.cloud domain including public zones, private zones, and Route 53 Resolver'
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for the private hosted zone and resolver
+  
+  Environment:
+    Type: String
+    Default: ops
+    Description: Environment name
+
+  # Existing hosted zone ID for goodword.cloud
+  PublicHostedZoneId:
+    Type: String
+    Default: Z04032891ZM6L7J3T40M7
+    Description: Existing hosted zone ID for goodword.cloud
+
+Resources:
+  # =============================================================================
+  # ROUTE 53 RESOLVER (for private DNS access via Tailscale)
+  # =============================================================================
+  
+  # Security Group for Resolver
+  ResolverSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Route 53 Resolver
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+
+  # Route 53 Resolver Endpoint
+  ResolverEndpoint:
+    Type: AWS::Route53Resolver::ResolverEndpoint
+    Properties:
+      Name: internal-dns-resolver
+      Direction: INBOUND
+      SecurityGroupIds:
+        - !Ref ResolverSecurityGroup
+      IpAddresses:
+        - SubnetId: subnet-0beb3b4005a508fbd
+          Ip: 172.22.1.100
+
+  # =============================================================================
+  # PUBLIC SUBDOMAIN FOR INTERNAL SERVICES (publicly resolvable)
+  # =============================================================================
+  
+  # Public Subdomain for internal services (publicly resolvable)
+  InternalSubdomainZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: internal.goodword.cloud
+      HostedZoneConfig:
+        Comment: 'Public subdomain for internal services - publicly resolvable with private IPs'
+
+  # =============================================================================
+  # PUBLIC DNS RECORDS (goodword.cloud)
+  # =============================================================================
+
+  # NS Delegation for internal subdomain
+  InternalSubdomainDelegation:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref PublicHostedZoneId
+      Name: internal.goodword.cloud
+      Type: NS
+      TTL: 300
+      ResourceRecords:
+        - ns-781.awsdns-33.net
+        - ns-1173.awsdns-18.org
+        - ns-83.awsdns-10.com
+        - ns-1992.awsdns-57.co.uk
+
+  # API Gateway
+  ApiRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref PublicHostedZoneId
+      Name: api.goodword.cloud
+      Type: CNAME
+      TTL: 60
+      ResourceRecords:
+        - jsum2m52sf.us-east-2.awsapprunner.com
+
+  # Data Operations Database
+  DataOperationsDbRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref PublicHostedZoneId
+      Name: data-operations-db.goodword.cloud
+      Type: CNAME
+      TTL: 300
+      ResourceRecords:
+        - prod-goodword-data-operations-cluster-v3.cluster-cbys2uie40p0.us-east-2.rds.amazonaws.com
+
+  # Main Database
+  DbRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref PublicHostedZoneId
+      Name: db.goodword.cloud
+      Type: CNAME
+      TTL: 60
+      ResourceRecords:
+        - prod-db.cbys2uie40p0.us-east-2.rds.amazonaws.com
+
+  # Klavitron Service
+  KlavitronRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref PublicHostedZoneId
+      Name: klavitron.goodword.cloud
+      Type: CNAME
+      TTL: 60
+      ResourceRecords:
+        - d-qj7cowfkj2.execute-api.us-east-2.amazonaws.com
+
+  # Klavitron 2025-08-14 deployment
+  Klavitron20250814Record:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref PublicHostedZoneId
+      Name: klavitron-202508141805.us-east-2.goodword.cloud
+      Type: CNAME
+      TTL: 60
+      ResourceRecords:
+        - d-tmbgmd9l45.execute-api.us-east-2.amazonaws.com
+
+  # =============================================================================
+  # PUBLIC INTERNAL SERVICE RECORDS (goodword.cloud - for external access)
+  # =============================================================================
+
+  # SQLMesh Server (Public)
+  SqlmeshPublicRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref PublicHostedZoneId
+      Name: sqlmesh.goodword.cloud
+      Type: A
+      TTL: 300
+      ResourceRecords:
+        - 172.22.2.106
+
+  # PostgreSQL Database (Public)
+  PostgresPublicRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref PublicHostedZoneId
+      Name: postgres.goodword.cloud
+      Type: A
+      TTL: 300
+      ResourceRecords:
+        - 172.22.4.203
+
+  # Operations Host (Public)
+  OperationsPublicRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref PublicHostedZoneId
+      Name: operations.goodword.cloud
+      Type: A
+      TTL: 300
+      ResourceRecords:
+        - 172.22.1.10
+
+  # =============================================================================
+  # PUBLIC INTERNAL SUBDOMAIN RECORDS (internal.goodword.cloud - publicly resolvable)
+  # =============================================================================
+
+  # SQLMesh Server
+  SqlmeshInternalRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref InternalSubdomainZone
+      Name: sqlmesh.internal.goodword.cloud
+      Type: A
+      TTL: 300
+      ResourceRecords:
+        - 172.22.2.106
+
+  # PostgreSQL Database (SQLMesh)
+  PostgresInternalRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref InternalSubdomainZone
+      Name: postgres.internal.goodword.cloud
+      Type: A
+      TTL: 300
+      ResourceRecords:
+        - 172.22.4.203
+
+  # Operations Host
+  OperationsInternalRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref InternalSubdomainZone
+      Name: operations.internal.goodword.cloud
+      Type: A
+      TTL: 300
+      ResourceRecords:
+        - 172.22.1.10
+
+  # Wildcard CNAME for convenience (points to root)
+  WildcardInternalRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref InternalSubdomainZone
+      Name: '*.internal.goodword.cloud'
+      Type: CNAME
+      TTL: 300
+      ResourceRecords:
+        - internal.goodword.cloud
+
+  # =============================================================================
+  # ADDITIONAL INTERNAL SERVICES (for future expansion)
+  # =============================================================================
+
+  # Future: API Gateway internal endpoint
+  # InternalApiRecord:
+  #   Type: AWS::Route53::RecordSet
+  #   Properties:
+  #     HostedZoneId: !Ref InternalSubdomainZone
+  #     Name: api.internal.goodword.cloud
+  #     Type: A
+  #     TTL: 300
+  #     ResourceRecords:
+  #       - 172.22.x.x
+
+  # Future: Monitoring/Grafana
+  # MonitoringRecord:
+  #   Type: AWS::Route53::RecordSet
+  #   Properties:
+  #     HostedZoneId: !Ref InternalSubdomainZone
+  #     Name: monitoring.internal.goodword.cloud
+  #     Type: A
+  #     TTL: 300
+  #     ResourceRecords:
+  #       - 172.22.x.x
+
+  # Future: Logging/ELK Stack
+  # LoggingRecord:
+  #   Type: AWS::Route53::RecordSet
+  #   Properties:
+  #     HostedZoneId: !Ref InternalSubdomainZone
+  #     Name: logs.internal.goodword.cloud
+  #     Type: A
+  #     TTL: 300
+  #     ResourceRecords:
+  #       - 172.22.x.x
+
+Outputs:
+  # =============================================================================
+  # RESOLVER INFORMATION
+  # =============================================================================
+  
+  ResolverEndpointId:
+    Description: Route 53 Resolver Endpoint ID
+    Value: !Ref ResolverEndpoint
+    Export:
+      Name: !Sub '${AWS::StackName}-ResolverEndpointId'
+  
+  ResolverIpAddress:
+    Description: Resolver IP Address for Tailscale
+    Value: 172.22.1.100
+    Export:
+      Name: !Sub '${AWS::StackName}-ResolverIpAddress'
+
+  # =============================================================================
+  # ZONE INFORMATION
+  # =============================================================================
+  
+  # Public Zone Information
+  PublicHostedZoneId:
+    Description: Public Hosted Zone ID for goodword.cloud
+    Value: !Ref PublicHostedZoneId
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicHostedZoneId'
+
+  # Internal Subdomain Zone Information
+  InternalSubdomainZoneId:
+    Description: Internal Subdomain Zone ID for internal.goodword.cloud
+    Value: !Ref InternalSubdomainZone
+    Export:
+      Name: !Sub '${AWS::StackName}-InternalSubdomainZoneId'
+  
+  InternalSubdomainZoneName:
+    Description: Internal Subdomain Zone Name
+    Value: !Ref InternalSubdomainZone
+    Export:
+      Name: !Sub '${AWS::StackName}-InternalSubdomainZoneName'
+
+  # =============================================================================
+  # DNS ENDPOINTS SUMMARY
+  # =============================================================================
+  
+  PublicEndpoints:
+    Description: Public DNS endpoints (existing services)
+    Value: |
+      api.goodword.cloud
+      data-operations-db.goodword.cloud
+      db.goodword.cloud
+      klavitron.goodword.cloud
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicEndpoints'
+
+  PublicInternalEndpoints:
+    Description: Public DNS endpoints (internal services - accessible from anywhere)
+    Value: |
+      sqlmesh.goodword.cloud
+      postgres.goodword.cloud
+      operations.goodword.cloud
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicInternalEndpoints'
+
+  InternalSubdomainEndpoints:
+    Description: Internal subdomain endpoints (internal.goodword.cloud - publicly resolvable with private IPs)
+    Value: |
+      sqlmesh.internal.goodword.cloud
+      postgres.internal.goodword.cloud
+      operations.internal.goodword.cloud
+    Export:
+      Name: !Sub '${AWS::StackName}-InternalSubdomainEndpoints'
+
+  # Combined DNS Summary
+  AllDnsEndpoints:
+    Description: All DNS endpoints managed by this stack
+    Value: |
+      === PUBLIC SERVICES ===
+      api.goodword.cloud
+      data-operations-db.goodword.cloud
+      db.goodword.cloud
+      klavitron.goodword.cloud
+      
+      === INTERNAL SERVICES (PUBLIC ACCESS) ===
+      sqlmesh.goodword.cloud
+      postgres.goodword.cloud
+      operations.goodword.cloud
+      
+      === INTERNAL SERVICES (SUBDOMAIN) ===
+      sqlmesh.internal.goodword.cloud
+      postgres.internal.goodword.cloud
+      operations.internal.goodword.cloud
+      
+      === RESOLVER ===
+      DNS Resolver: 172.22.1.100 (for Tailscale)
+    Export:
+      Name: !Sub '${AWS::StackName}-AllDnsEndpoints'
