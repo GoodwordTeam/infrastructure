@@ -143,6 +143,13 @@ Resources:
                 Resource:
                   - !GetAtt SqlmeshArtifactsBucket.Arn
                   - !Sub '${SqlmeshArtifactsBucket.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource:
+                  - arn:aws:s3:::growth-automations/config/*
+                Sid: KlavitronConfigUpload
       Tags:
         - Key: Name
           Value: ops-sqlmesh-server-role
